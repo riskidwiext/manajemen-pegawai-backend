@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const pegawaiSchema = new mongoose.Schema({
   NIP: { type: String, required: true, unique: true },
   PANGKAT: String,
+NAMA:String,
   GOL: String,
   TMT: String,
   JABATAN: String,

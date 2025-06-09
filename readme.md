@@ -102,5 +102,7 @@ GET /api/pegawai?JABATAN=Kepala&GOL=IVb&page=1&limit=5
 - Pastikan MinIO dan MongoDB sudah berjalan sebelum menjalankan backend.
 
 ---
+docker build -t manajemen-pegawai-backend .
+docker run -d --network app-network --name manajemen-pegawai-backend -p 8011:8011 manajemen-pegawai-backend
 
 **Lisensi:** MIT

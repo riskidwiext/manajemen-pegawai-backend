@@ -1,6 +1,7 @@
 const express = require('express');
 const Pegawai = require('../models/Pegawai');
 const PegawaiResponse = require('../constants/pegawaiResponse');
+const GlobalConfig = require('../models/GlobalConfig'); // Ganti ke GlobalConfig
 const router = express.Router();
 
 // Create
@@ -41,7 +42,6 @@ router.get('/', async (req, res) => {
     if (req.query.JABATAN) filter.JABATAN = { $regex: req.query.JABATAN, $options: 'i' };
     if (req.query.PANGKAT) filter.PANGKAT = { $regex: req.query.PANGKAT, $options: 'i' };
     if (req.query.GOL) filter.GOL = { $regex: req.query.GOL, $options: 'i' };
-    // Tambahkan filter lain sesuai kebutuhan
 
     const [pegawai, total] = await Promise.all([
       Pegawai.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -145,19 +145,33 @@ router.delete('/:id', async (req, res) => {
 router.get('/dashboard/per-unit', async (req, res) => {
   try {
     const data = await Pegawai.aggregate([
-      { $group: { _id: "$UNIT_KERJA", count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
+      { $group: { _id: "$JABATAN", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 5 }
     ]);
 
-    // Format untuk ApexCharts: categories dan series
-    const categories = data.map(item => item._id || 'Lainnya');
+    // Generate kode 2 huruf kapital unik untuk setiap jabatan
+    const kodeSet = new Set();
+    const kodeMap = {};
+    data.forEach(item => {
+      let kode;
+      do {
+        kode = Math.random().toString(36).substring(2, 4).toUpperCase();
+      } while (kodeSet.has(kode) || !/^[A-Z]{2}$/.test(kode));
+      kodeSet.add(kode);
+      kodeMap[item._id] = kode;
+    });
+
+    const categories = data.map(item => kodeMap[item._id]);
+    const legend = data.map(item => `${kodeMap[item._id]}: ${item._id || 'LAINNYA'}`);
     const series = data.map(item => item.count);
 
     res.json({
       response_code: "S20011",
       message: "Data pegawai per unit berhasil diambil.",
       data: {
-        categories,
+        categories, // kode random 2 huruf untuk chart
+        legend,     // kode:jabatan untuk legend chart
         series
       }
     });
@@ -165,6 +179,55 @@ router.get('/dashboard/per-unit', async (req, res) => {
     res.status(500).json({
       response_code: "E50011",
       message: "Gagal mengambil data pegawai per unit.",
+      data: null
+    });
+  }
+});
+
+// Dashboard summary
+router.get('/dashboard/summary', async (req, res) => {
+  try {
+    const totalPegawai = await Pegawai.countDocuments();
+
+    // Ambil konfigurasi kenaikan pangkat dari GlobalConfig (default 4 tahun jika belum ada)
+    let config = await GlobalConfig.findOne({ key: "kenaikan_pangkat_tahun" });
+    const tahunKenaikan = config ? config.value : 4;
+
+    // Ambil tanggal hari ini
+    const now = new Date();
+
+    // Cari pegawai yang akan naik pangkat dalam 3 bulan ke depan
+    const pegawai = await Pegawai.find({ TMT: { $exists: true, $ne: null } });
+
+    const pegawaiAkanNaik = pegawai.filter(p => {
+      // TMT format: "dd/mm/yyyy"
+      const [day, month, year] = (p.TMT || '').split('/');
+      if (!day || !month || !year) return false;
+      const tmtDate = new Date(`${year}-${month}-${day}`);
+      const nextKenaikan = new Date(tmtDate);
+      nextKenaikan.setFullYear(nextKenaikan.getFullYear() + tahunKenaikan);
+
+      // 3 bulan ke depan
+      const batas = new Date(now);
+      batas.setMonth(batas.getMonth() + 3);
+
+      return nextKenaikan > now && nextKenaikan <= batas;
+    });
+
+    res.json({
+      response_code: "S20012",
+      message: "Summary dashboard berhasil diambil.",
+      data: {
+        totalPegawai,
+        tahunKenaikan,
+        jumlahAkanNaik: pegawaiAkanNaik.length,
+        pegawaiAkanNaik
+      }
+    });
+  } catch (err) {
+    res.status(500).json({
+      response_code: "E50012",
+      message: "Gagal mengambil summary dashboard.",
       data: null
     });
   }
